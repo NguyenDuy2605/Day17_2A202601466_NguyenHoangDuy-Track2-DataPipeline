@@ -1,21 +1,26 @@
 # Báo cáo LAB 17 — Data Pipeline Engineering
 
-**Họ tên:** Nguyễn Hoàng Duy **Lớp:** E403 **Ngày:** 2026-08-17
+**Họ tên:** Nguyễn Hoàng Duy · **Lớp:** AICB-P2T2 · **Ngày:** 2026-08-17
 
 > **Cách tái lập trên máy sạch** — `data/` nằm trong `.gitignore` nên phải sinh
 > lại, và bài mở rộng A đã đổi `queries/dashboard.sql` sang dataset đã compact:
 >
 > ```bash
-> make setup     # venv + thư viện + 14 ngày dữ liệu
-> make extra     # = seed-extra + compact  (sinh data/gold_events + gold_events_v2)
-> make verify    # 3 lượt + bảng chấm
+> make setup       # venv + thư viện + 14 ngày dữ liệu
+> make seed-extra  # dữ liệu bài mở rộng + compact  (~30 giây)
+> make verify      # 3 lượt + bảng chấm
 > make crash-test
 > ```
 >
 > `expected/dashboard_baseline.json` được commit sẵn trong repo gốc, nên
-> `make verify` sẽ đo `queries/dashboard.sql` ngay cả khi chưa có `data/` —
-> vì thế `make extra` cần chạy **trước** `make verify` (target `extra` là chỗ
-> duy nhất tôi thêm vào Makefile, nó chỉ gọi lại hai target có sẵn).
+> `make verify` **luôn** đo `queries/dashboard.sql`, kể cả khi chưa có `data/`.
+> Vì query đó giờ trỏ vào `data/gold_events_v2`, tôi cho `seed-extra` gọi luôn
+> `compact` ở bước cuối — để đúng trình tự ghi trong RUBRIC/EXTRA
+> (`make seed-extra` → `make explain` / `make verify`) là đã có sẵn dataset,
+> không phải nhớ thêm lệnh nào. `compact` đặt **sau** `--save-baseline` nên
+> baseline vẫn luôn được đo trên dataset gốc 5.000 file. Đây là thay đổi duy
+> nhất của tôi trong Makefile (cùng alias `make extra`); nó chỉ gọi lại các
+> target có sẵn, không đụng vào `expected/` hay `tools/verify.py`.
 
 ---
 
@@ -172,11 +177,11 @@ lượt chạy đều thiếu giống hệt nhau nên `make verify` không thể
 vậy tôi đối chiếu bảng incremental với bản **tính lại toàn bộ** từ Silver
 (`EXCEPT` hai chiều, so từng ô của cả 11 cột):
 
-| Đối chiếu | Lệch |
-|---|---|
-| `gold_feature_daily` ⟷ tính lại toàn bộ từ `silver_events` | **0** hàng (cả hai chiều) |
-| `gold_training_set` ⟷ tính lại toàn bộ từ `silver_tickets` | **0** hàng (cả hai chiều — không sót, không còn hàng cũ) |
-| Cặp `(event_date, customer_id)` có trong Silver mà thiếu ở Gold | **0** |
+| Đối chiếu                                                       | Lệch                                                     |
+| --------------------------------------------------------------- | -------------------------------------------------------- |
+| `gold_feature_daily` ⟷ tính lại toàn bộ từ `silver_events`      | **0** hàng (cả hai chiều)                                |
+| `gold_training_set` ⟷ tính lại toàn bộ từ `silver_tickets`      | **0** hàng (cả hai chiều — không sót, không còn hàng cũ) |
+| Cặp `(event_date, customer_id)` có trong Silver mà thiếu ở Gold | **0**                                                    |
 
 Nói cách khác: hai bảng incremental cho kết quả **không phân biệt được** với
 một bảng dựng lại từ đầu — đó mới là định nghĩa đầy đủ của "incremental đúng",
@@ -234,10 +239,10 @@ còn tính ổn định chỉ là điều kiện cần.
 
 |                    |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Triệu chứng**    | Consumer bị `kill -9` ở lô thứ 7. Tái hiện lại đúng thứ tự gốc cho thấy: offset đã commit = **3.500** trong khi kho mới chỉ có **3.000** hàng (6 lô đầu). Khởi động lại đọc tiếp từ message 3.501 → **mất trọn 500 message của lô 7**, im lặng, không lỗi, không cách nào phát hiện nếu chỉ nhìn log.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Triệu chứng**    | Consumer bị `kill -9` ở lô thứ 7. Tái hiện lại đúng thứ tự gốc cho thấy: offset đã commit = **3.500** trong khi kho mới chỉ có **3.000** hàng (6 lô đầu). Khởi động lại đọc tiếp từ message 3.501 → **mất trọn 500 message của lô 7**, im lặng, không lỗi, không cách nào phát hiện nếu chỉ nhìn log.                                                                                                                                                                                                                                                                                                                                                                                            |
 | **Nguyên nhân**    | `consume()` gọi `consumer.commit()` **trước** `write_batch()`. Offset và dữ liệu nằm trên hai hệ thống lưu trữ khác nhau, không có transaction chung, nên giữa hai thao tác luôn tồn tại một cửa sổ mà offset đã tuyên bố "lô này xử lý xong" trong khi kho chưa hề có nó. Chết trong cửa sổ đó là **mất dữ liệu vĩnh viễn** — đó chính là định nghĩa **at-most-once**. Cửa sổ này không thể xoá được bằng cách viết code cẩn thận hơn: _exactly-once không tồn tại ở tầng giao vận_. Thứ duy nhất chọn được là **hướng** của sai số — mất hay trùng — và trùng thì khử được, mất thì không.                                                                                                     |
 | **Cách khắc phục** | `ingest/consumer.py`: (a) đảo thứ tự thành **ghi trước, commit sau** → chuyển sang **at-least-once**, crash làm lô 7 được đọc lại chứ không bị bỏ qua; (b) khử phần trùng bằng **phép ghi idempotent**: thêm `primary key` cho `event_id` trong DDL và đổi `INSERT` thành `INSERT … ON CONFLICT (event_id) DO UPDATE SET …`. Chọn `DO UPDATE` chứ không `DO NOTHING`: nếu một message được phát lại với nội dung **đã đổi**, `DO NOTHING` giữ lại phiên bản cũ — dữ liệu lỗi thời một cách im lặng; `DO UPDATE` luôn hội tụ về phiên bản mới nhất, nên kết quả cuối chỉ phụ thuộc **tập** message đã xử lý chứ không phụ thuộc mỗi message được xử lý mấy lần. Đó đúng là định nghĩa idempotent. |
-| **Bằng chứng**     | Trước (thứ tự gốc): offset 3.500 / kho 3.000 → mất 500. Sau: A (chạy thẳng) = 20.000 hàng / 20.000 `event_id` · B = chết ở lô 7, offset commit **3.000** (đúng bằng phần đã ghi xong — offset không còn chạy trước dữ liệu) · C (restart, phát lại 17.000 message trong đó 500 message của lô 7 là bản trùng) = **20.000 hàng / 20.000 `event_id`** → không mất, không trùng, **C == A**. `make crash-test`: **ĐẠT ✓**; `make verify` vẫn 4/4.                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Bằng chứng**     | Trước (thứ tự gốc): offset 3.500 / kho 3.000 → mất 500. Sau: A (chạy thẳng) = 20.000 hàng / 20.000 `event_id` · B = chết ở lô 7, offset commit **3.000** (đúng bằng phần đã ghi xong — offset không còn chạy trước dữ liệu) · C (restart, phát lại 17.000 message trong đó 500 message của lô 7 là bản trùng) = **20.000 hàng / 20.000 `event_id`** → không mất, không trùng, **C == A**. `make crash-test`: **ĐẠT ✓**; `make verify` vẫn 4/4.                                                                                                                                                                                                                                                   |
 
 ---
 

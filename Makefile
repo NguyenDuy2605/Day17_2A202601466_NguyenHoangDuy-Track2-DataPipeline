@@ -33,10 +33,15 @@ seed:  ## sinh lại dữ liệu seed
 seed-extra:  ## sinh thêm dữ liệu cho bài mở rộng trong EXTRA.md (~30 giây)
 	@$(PY) seed/generate.py --extra
 	@$(PY) tools/explain.py --save-baseline
-
-extra:  ## [mở rộng] seed-extra + compact — chạy MỘT lần trước make verify
-	@$(MAKE) seed-extra
+	@# Bài mở rộng A đã trỏ queries/dashboard.sql vào dataset đã compact
+	@# (data/gold_events_v2). Gọi compact ngay tại đây để mọi trình tự có
+	@# trong RUBRIC/EXTRA — `make seed-extra` rồi `make explain` / `make verify`
+	@# — đều có sẵn dataset đó. Đặt SAU --save-baseline để baseline luôn được
+	@# đo trên dataset gốc 5.000 file, không bao giờ trên bản đã tối ưu.
 	@$(MAKE) compact
+
+extra:  ## [mở rộng] alias của seed-extra (sinh dữ liệu + compact)
+	@$(MAKE) seed-extra
 
 pipeline:  ## chạy đường ống một lượt (14 ngày vận hành)
 	@$(PY) tools/run_pipeline.py
