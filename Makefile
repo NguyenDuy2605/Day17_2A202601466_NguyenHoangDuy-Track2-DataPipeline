@@ -8,7 +8,7 @@ export LAB17_DB := $(CURDIR)/warehouse.duckdb
 export DBT_PROFILES_DIR := $(CURDIR)/dbt
 
 .DEFAULT_GOAL := help
-.PHONY: help setup seed seed-extra pipeline verify quick explain plan dbt-test \
+.PHONY: help setup seed seed-extra extra pipeline verify quick explain plan dbt-test \
         dbt-docs crash-test compact reset clean
 
 help:  ## danh sách lệnh
@@ -33,6 +33,10 @@ seed:  ## sinh lại dữ liệu seed
 seed-extra:  ## sinh thêm dữ liệu cho bài mở rộng trong EXTRA.md (~30 giây)
 	@$(PY) seed/generate.py --extra
 	@$(PY) tools/explain.py --save-baseline
+
+extra:  ## [mở rộng] seed-extra + compact — chạy MỘT lần trước make verify
+	@$(MAKE) seed-extra
+	@$(MAKE) compact
 
 pipeline:  ## chạy đường ống một lượt (14 ngày vận hành)
 	@$(PY) tools/run_pipeline.py

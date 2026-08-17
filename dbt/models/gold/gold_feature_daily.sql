@@ -29,9 +29,20 @@
 --   rõ hai vấn đề này tách nhau.
 -- ---------------------------------------------------------------------------
 
+-- Số đo trên bronze_events (129.462 bản ghi):
+--     P50 = 0,13 ngày · P95 = 1,81 ngày · P99 = 2,73 ngày · max = 2,94 ngày
+--     5,05% bản ghi tới kho muộn hơn 1 ngày so với lúc sự kiện xảy ra.
+-- Khoảng cách theo NGÀY LỊCH giữa event_date và ingested_date lớn nhất = 3.
+-- => LOOKBACK = 3 ngày: làm tròn LÊN từ P99 (2,73) và vẫn phủ cả max (2,94).
+--    Mỗi ngày lùi thêm phải trả giá ở MỌI lượt chạy sau này (quét + ghi lại
+--    650 khách × 1 ngày), nên căn cứ là P99 chứ không phải "lùi cho chắc".
+{% set lookback_days = 3 %}
+
 {{ config(
-    materialized     = 'incremental',
-    on_schema_change = 'fail'
+    materialized         = 'incremental',
+    unique_key           = ['event_date', 'customer_id'],
+    incremental_strategy = 'delete+insert',
+    on_schema_change     = 'fail'
 ) }}
 
 select
@@ -49,7 +60,12 @@ select
 from {{ ref('silver_events') }}
 
 {% if is_incremental() %}
-where event_date > (select max(event_date) from {{ this }})
+-- Mốc so sánh là max(event_date) của BẢNG ĐÍCH — tức "ngày sự kiện xa nhất đã
+-- từng thấy", không phải "ngày vận hành hiện tại". Dấu `>` khiến mọi bản ghi
+-- có event_date <= mốc đó vĩnh viễn không được xử lý lại. Lùi lại
+-- {{ lookback_days }} ngày để dữ liệu về muộn còn cửa vào bảng.
+where event_date >= (select max(event_date) from {{ this }})
+                    - interval {{ lookback_days }} day
 {% endif %}
 
 group by 1, 2, 3, 4

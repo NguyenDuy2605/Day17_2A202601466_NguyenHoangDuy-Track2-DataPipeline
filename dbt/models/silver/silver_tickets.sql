@@ -35,16 +35,30 @@
 
 {{ config(materialized = 'table') }}
 
-with ranked as (
+-- Bước 1 — LỌC TRƯỚC: loại các BẢN GHI CDC mà macro không chuẩn hoá được.
+-- Chúng đi thẳng sang quarantine_tickets bằng đúng điều kiện phủ định.
+with valid_cdc as (
 
     select
         *,
-        {{ normalize_priority('priority_raw') }}             as priority_clean,
+        {{ normalize_priority('priority_raw') }}             as priority_clean
+    from {{ source('bronze', 'bronze_tickets_cdc') }}
+    where {{ normalize_priority('priority_raw') }} is not null
+
+),
+
+-- Bước 2 — XẾP HẠNG SAU: trạng thái mới nhất được chọn trong số các bản ghi
+-- CÒN HỢP LỆ. Ticket có bản ghi mới nhất bị hỏng vẫn giữ được trạng thái hợp
+-- lệ của lần cập nhật trước, nên số ticket không tụt khỏi 12.480.
+ranked as (
+
+    select
+        *,
         row_number() over (
             partition by ticket_id
             order by event_time desc, cdc_seq desc
         ) as _rn
-    from {{ source('bronze', 'bronze_tickets_cdc') }}
+    from valid_cdc
 
 ),
 

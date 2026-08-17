@@ -15,7 +15,14 @@ select
     quantile_cont(latency_ms, 0.95)::int            as p95_latency_ms,
     sum(case when is_escalated then 1 else 0 end)   as n_escalated,
     sum(tokens_in + tokens_out)                     as tokens_total
-from read_parquet('data/gold_events/*.parquet')
+-- Sau nhiệm vụ mở rộng A:
+--   * trỏ vào dataset đã compact (data/gold_events_v2, partition theo ngày);
+--   * bật hive_partitioning để engine đọc được event_date TỪ ĐƯỜNG DẪN và
+--     loại 13/14 thư mục trước khi mở bất kỳ file nào;
+--   * bỏ strftime() khỏi vế trái: cột phải đứng một mình thì predicate mới
+--     sargable — engine mới so được nó với tên thư mục partition và với
+--     thống kê min/max của từng row group.
+from read_parquet('data/gold_events_v2/**/*.parquet', hive_partitioning = true)
 where customer_name = 'ACME'
-  and strftime(event_time, '%Y-%m-%d') = '2026-08-09'
+  and event_date = '2026-08-09'
 group by 1
