@@ -157,6 +157,31 @@ không hội tụ, nên lỗi này không thể tự khỏi bằng cách "chạy
 > đo lại định kỳ: khi phân bố trễ đổi, lookback phải đổi theo, và đó là lý do
 > nó được viết thành một biến `lookback_days` đặt ngay cạnh số đo trong file.
 
+**Biên an toàn của lookback (đo được, không phải ước lượng).** Mốc so sánh là
+`max(event_date)` của **bảng đích**, mà bảng đích chỉ chứa dữ liệu đã nạp đến
+hết ngày hôm trước — nên bản thân mốc đã trễ một ngày so với ngày vận hành. Đo
+trực tiếp trên dữ liệu: với mọi ngày nạp `D`, chênh lệch giữa mốc lúc đó và
+`event_date` nhỏ nhất của lô vừa tới lớn nhất là **2 ngày**. Tức lookback tối
+thiểu đủ dùng là 2, và lookback 3 đang có **1 ngày dự phòng** — đủ chỗ cho một
+đợt trễ xấu hơn hiện tại mà không phải sửa code.
+
+**Kiểm chứng độ đúng của giá trị, không chỉ số hàng.** Số hàng đúng và checksum
+ổn định vẫn có thể che một bảng sai **giá trị**: nếu dữ liệu muộn rơi ra ngoài
+lookback, hàng `(ngày, khách)` vẫn tồn tại nhưng `n_events` bị thiếu, và cả ba
+lượt chạy đều thiếu giống hệt nhau nên `make verify` không thể phát hiện. Vì
+vậy tôi đối chiếu bảng incremental với bản **tính lại toàn bộ** từ Silver
+(`EXCEPT` hai chiều, so từng ô của cả 11 cột):
+
+| Đối chiếu | Lệch |
+|---|---|
+| `gold_feature_daily` ⟷ tính lại toàn bộ từ `silver_events` | **0** hàng (cả hai chiều) |
+| `gold_training_set` ⟷ tính lại toàn bộ từ `silver_tickets` | **0** hàng (cả hai chiều — không sót, không còn hàng cũ) |
+| Cặp `(event_date, customer_id)` có trong Silver mà thiếu ở Gold | **0** |
+
+Nói cách khác: hai bảng incremental cho kết quả **không phân biệt được** với
+một bảng dựng lại từ đầu — đó mới là định nghĩa đầy đủ của "incremental đúng",
+còn tính ổn định chỉ là điều kiện cần.
+
 ---
 
 ## 3 · Kiểu dữ liệu cột `priority` thay đổi giữa chu kỳ
